@@ -1,0 +1,313 @@
+---
+title: "NSM"
+author: "Sajad Ghashami"
+format:
+  html:
+    theme: cosmo
+execute: 
+  echo: false
+  warning: false
+  error: false
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(DBI)
+library(rmarkdown)
+library(ggpubr)
+library(data.table)
+library(knitr)
+library(plotly)
+```
+
+```{r }
+con <- DBI::dbConnect(odbc::odbc(),
+                      #Snowflake
+                      #SnowflakeDSIIDriver
+                      Driver       = "SnowflakeDSIIDriver",
+                      Server       = "ed87949.us-east-1.snowflakecomputing.com",
+                      UID          = rstudioapi::askForPassword("Database user"),
+                      PWD          = rstudioapi::askForPassword("Database password"),
+                      Database     = "EDW",
+                      Warehouse    = "shiny_app",
+                      Schema       = "dim"
+                      #,
+                      #authenticator = "externalbrowser"
+                      )
+mywh <- DBI::dbSendQuery(con, 'use role shiny_app_role')
+mywh <- DBI::dbSendQuery(con, 'use warehouse shiny_app')
+```
+
+```{r}
+NSM_CORR_paid_record_account <- DBI::dbGetQuery(con,
+             "
+ SELECT *
+ FROM ANALYTICS.SANDBOX.NSM_PAID_TYPE_CORR_2022_11_17           
+     ")
+
+NSM_CORR_paid_record_account <- NSM_CORR_paid_record_account 
+#%>% drop_na()
+```
+
+```{r, out.width = "100%", out.height = "50px" }
+#| column: page
+#| out-width: 150%
+
+
+NSM_CORR_paid_record_account %>%
+  rename( "BUYER_ACCOUNTS(Accounts.that.paid.the.subscriptions)" = BUYER_ACCOUNTS) %>% 
+  DT::datatable( filter = 'top', options = list(
+  pageLength = 5, autoWidth = TRUE, lengthMenu = c(5, 10, 15, 20),
+  columnDefs = list(list(width = '200px', targets = c(1,2)),
+                    list(width = '400px', targets = c( 5)))
+) 
+    )
+
+#head(NSM_CORR_paid_record_account)
+```
+
+
+
+## Revenue Per account type
+
+### Transformed data
+
+```{r}
+#| column: page
+#| out-width: 75%
+d <- ggdensity(NSM_CORR_paid_record_account, x = "TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE",
+   add = "mean", rug = TRUE,
+   color = "PROVISIONED_RECORD_TYPE", fill = "PROVISIONED_RECORD_TYPE",
+   palette = c("#00AFBB", "#E7B800", "#FC4E07")) +
+   xscale("log10", .format = TRUE)
+ggpar(d, legend = "bottom")
+```
+
+## Revenue Per reporting segment
+
+### Transformed data
+
+```{r}
+#| column: page
+#| out-width: 100%
+a <- ggdensity(NSM_CORR_paid_record_account, x = "TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE",
+   add = "mean", rug = TRUE,
+   color = "PROVISIONED_REPORTING_SEGMENT", fill = "PROVISIONED_REPORTING_SEGMENT",
+   palette = c("#00AFBB", "#E7B800", "#FC4E07", "#666666", "#66A61E")) +
+   xscale("log10", .format = TRUE)
+#b <- ggpar(a, legend = "bottom")
+a
+#plotly::ggplotly(a)
+```
+
+## Number of actions Per account type
+
+### Transformed data
+
+```{r}
+#| column: page
+#| out-width: 75%
+ggdensity(NSM_CORR_paid_record_account, x = "TOTAL_NUMBER_OF_ACTIONS",
+   add = "mean", rug = TRUE,
+   color = "PROVISIONED_RECORD_TYPE", fill = "PROVISIONED_RECORD_TYPE",
+   palette = c("#00AFBB", "#E7B800", "#FC4E07")) +
+   xscale("log10", .format = TRUE)
+```
+
+## Number of actions Per reporting segment
+
+### Transformed data
+
+```{r}
+#| column: page
+#| out-width: 100%
+b <- ggdensity(NSM_CORR_paid_record_account, x = "TOTAL_NUMBER_OF_ACTIONS",
+   add = "mean", rug = TRUE,
+   color = "PROVISIONED_REPORTING_SEGMENT", fill = "PROVISIONED_REPORTING_SEGMENT",
+   palette = c("#00AFBB", "#E7B800", "#FC4E07", "#666666", "#66A61E")) +
+   xscale("log10", .format = TRUE)
+b
+#plotly::ggplotly(b)
+```
+
+
+
+```{r,fig.height=10}
+#| column: page
+#| out-width: 100%
+
+NSM_CORR_paid_record_account %>%
+  mutate(year_first_subscription_start=
+format(NSM_CORR_paid_record_account$FIRST_SUBSCRIPTION_START_DATE, format="%Y"),
+year_last_subscription_end=
+  format(NSM_CORR_paid_record_account$LAST_SUBSCRIPTION_START_DATE, format="%Y")
+) %>%
+  ggplot(aes(FIRST_SUBSCRIPTION_START_DATE, TOTAL_NUMBER_OF_ACTIONS)) +
+  geom_point(alpha=0.2, size=1, aes(color=year_first_subscription_start)) +
+  geom_smooth(color="black", method="lm") +
+  facet_wrap(~year_first_subscription_start+ year_last_subscription_end, scales="free")+
+  theme(legend.position="bottom",
+        text = element_text(size=5),
+        axis.text.x=element_text(angle=60, hjust=1))+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%Y %b") 
+  
+```
+
+
+
+## Correlation table
+
+```{r}
+cor_rev_total <- cor(NSM_CORR_paid_record_account$TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE  ,NSM_CORR_paid_record_account$TOTAL_NUMBER_OF_ACTIONS)
+
+
+cor_rev_paid <- cor(NSM_CORR_paid_record_account$TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE  ,NSM_CORR_paid_record_account$PAID_STUDENTS_NUMBER_OF_ACTIONS)
+
+
+cor_rev_free <-cor(NSM_CORR_paid_record_account$TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE  ,NSM_CORR_paid_record_account$FREE_STUDENTS_NUMBER_OF_ACTIONS)
+
+Between <- c("Revenue and Total Number of actions",
+            "Revenue and Total Number of actions by paid students",
+            "Revenue and Total Number of actions by free students")
+Correlation_values <- c(cor_rev_total, cor_rev_paid, cor_rev_free)
+Correlation_values <- round(Correlation_values,2)
+data.frame(Between, Correlation_values) %>% kable()
+```
+
+# Global Scatter Plot
+
+```{r}
+#| column: page
+p <- ggplot(NSM_CORR_paid_record_account, aes(TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE , TOTAL_NUMBER_OF_ACTIONS,  text = paste("Provisioned_Account:",PROVISIONED_ACCOUNT_NAME, "Buyer_Account:",BUYER_ACCOUNTS,  sep="\n"),
+size= DAYS_BETWEEN_FIRST_SUBSCRIPTION_DATE_NOW ))+
+  
+  geom_point(alpha= 0.1)+
+  scale_size(range = c(0.1, 2))+
+  geom_smooth(method="lm", inherit.aes = FALSE, aes(TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE,TOTAL_NUMBER_OF_ACTIONS ))
+ggplotly(p, tooltip = c("TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE", "TOTAL_NUMBER_OF_ACTIONS","text"))
+```
+
+## Correlation Per account type
+
+### Total number of actions
+
+```{r}
+#| column: page
+#| out-width: 75%
+ggscatter(NSM_CORR_paid_record_account, x = "TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE", y = "TOTAL_NUMBER_OF_ACTIONS",
+          size = 0.3, alpha = 0.3,
+          color = "PROVISIONED_RECORD_TYPE", palette = "jco",
+          facet.by = "PROVISIONED_RECORD_TYPE", scales = "free",
+          add = "reg.line", conf.int = TRUE) +
+  stat_cor(aes(color = PROVISIONED_RECORD_TYPE), method = "pearson")
+```
+
+### Paid students actions
+
+```{r}
+#| column: page
+#| out-width: 75%
+ggscatter(NSM_CORR_paid_record_account, x = "TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE", y = "PAID_STUDENTS_NUMBER_OF_ACTIONS",
+          size = 0.3, alpha = 0.3,
+          color = "PROVISIONED_RECORD_TYPE", palette = "jco",
+          facet.by = "PROVISIONED_RECORD_TYPE", scales = "free",
+          add = "reg.line", conf.int = TRUE) +
+  stat_cor(aes(color = PROVISIONED_RECORD_TYPE))
+```
+
+### Free students actions
+
+```{r}
+#| column: page
+#| out-width: 75%
+ggscatter(NSM_CORR_paid_record_account, x = "TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE", y = "FREE_STUDENTS_NUMBER_OF_ACTIONS",
+           size = 0.3, alpha = 0.3,
+          color = "PROVISIONED_RECORD_TYPE", palette = "jco",
+          facet.by = "PROVISIONED_RECORD_TYPE", scales = "free",
+          add = "reg.line", conf.int = TRUE) +
+  stat_cor(aes(color = PROVISIONED_RECORD_TYPE), method = "pearson")
+```
+
+## Correlation Per reporting segment
+
+### Total number of actions
+
+```{r}
+#| column: page
+#| out-width: 75%
+ggscatter(NSM_CORR_paid_record_account, x = "TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE", y = "TOTAL_NUMBER_OF_ACTIONS",
+          size = 0.3, alpha = 0.3,
+          color = "PROVISIONED_REPORTING_SEGMENT", palette = "jco",
+          facet.by = "PROVISIONED_REPORTING_SEGMENT", scales = "free",
+          add = "reg.line", conf.int = TRUE) +
+  stat_cor(aes(color = PROVISIONED_REPORTING_SEGMENT), method = "pearson")
+```
+
+### Paid students actions
+
+```{r}
+#| column: page
+#| out-width: 75%
+ggscatter(NSM_CORR_paid_record_account, x = "TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE", y = "PAID_STUDENTS_NUMBER_OF_ACTIONS",
+          size = 0.3, alpha = 0.3,
+          color = "PROVISIONED_REPORTING_SEGMENT", palette = "jco",
+          facet.by = "PROVISIONED_REPORTING_SEGMENT", scales = "free",
+          add = "reg.line", conf.int = TRUE) +
+  stat_cor(aes(color = PROVISIONED_REPORTING_SEGMENT))
+```
+
+### Free students actions
+
+```{r}
+#| column: page
+#| out-width: 75%
+ggscatter(NSM_CORR_paid_record_account, x = "TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE", y = "FREE_STUDENTS_NUMBER_OF_ACTIONS",
+           size = 0.3, alpha = 0.3,
+          color = "PROVISIONED_REPORTING_SEGMENT", palette = "jco",
+          facet.by = "PROVISIONED_REPORTING_SEGMENT", scales = "free",
+          add = "reg.line", conf.int = TRUE) +
+  stat_cor(aes(color = PROVISIONED_REPORTING_SEGMENT), method = "pearson")
+```
+
+
+```{r}
+normalizeddata <- NSM_CORR_paid_record_account %>% rowwise() %>%
+  
+  mutate(
+diff_dates = as.numeric( difftime(
+  min( LAST_SUBSCRIPTION_START_DATE,Sys.Date()),
+  FIRST_SUBSCRIPTION_START_DATE,
+   units = "days")
+),
+
+normalized_revenue= TOTAL_SUBSCRIPTION_ANNUAL_CONTRACT_VALUE / diff_dates,
+normalized_number_of_actions = PAID_STUDENTS_NUMBER_OF_ACTIONS/diff_dates
+)
+```
+
+## Correlation table (Normalized)
+
+```{r}
+cor_rev_total <- cor(normalizeddata$normalized_revenue  ,normalizeddata$normalized_number_of_actions)
+
+
+
+Between <- c("Revenue and Total Number of actions")
+Correlation_values <- c(cor_rev_total)
+Correlation_values <- round(Correlation_values,2)
+data.frame(Between, Correlation_values) %>% kable()
+```
+
+# Global Scatter Plot (Normalized)
+
+```{r}
+#| column: page
+p <- ggplot(normalizeddata, aes(normalized_revenue , normalized_number_of_actions,  text = paste("Provisioned_Account:",PROVISIONED_ACCOUNT_NAME, "Buyer_Account:",BUYER_ACCOUNTS,  sep="\n"),
+size= DAYS_BETWEEN_FIRST_SUBSCRIPTION_DATE_NOW ))+
+  
+  geom_point(alpha= 0.1)+
+  scale_size(range = c(0.1, 2))+
+  geom_smooth(method="lm", inherit.aes = FALSE, aes(normalized_revenue,normalized_number_of_actions ))
+ggplotly(p, tooltip = c("normalized_revenue", "normalized_number_of_actions","text", "DAYS_BETWEEN_FIRST_SUBSCRIPTION_DATE_NOW"))
+```
